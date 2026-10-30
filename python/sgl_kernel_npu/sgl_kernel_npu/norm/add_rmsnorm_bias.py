@@ -31,11 +31,18 @@ def add_rmsnorm_bias_kernel(
     input_offsets = row_start * hidden_size + cols
     for i in tl.range(row_start, batch_size, row_step):
         # add
-        buffered_values = tl.load(input_ptr + input_offsets, mask=valid_mask, other=0.0)
-        buffered_values += tl.load(
+        # The reference adds in fp32 for both fp16 and bf16. Native vector
+        # add rounds the sum before it is used for the RMS variance.
+        input_values = tl.load(input_ptr + input_offsets, mask=valid_mask, other=0.0)
+        residual_values = tl.load(
             residual_ptr + input_offsets, mask=valid_mask, other=0.0
         )
-        tl.store(output2_ptr + input_offsets, buffered_values, mask=valid_mask)
+        buffered_values = input_values.to(tl.float32) + residual_values.to(tl.float32)
+        tl.store(
+            output2_ptr + input_offsets,
+            buffered_values.to(output2_ptr.dtype.element_ty),
+            mask=valid_mask,
+        )
         buffered_values = buffered_values.to(tl.float32)
         # norm
         squares = buffered_values * buffered_values  # .to(tl.float32)
